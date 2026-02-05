@@ -1,0 +1,155 @@
+#include "MeMegaPi.h"
+
+// CORRECTED MOTOR MAPPING:
+MeMegaPiDCMotor motor1(PORT3A);
+MeMegaPiDCMotor motor2(PORT2A);
+MeMegaPiDCMotor motor3(PORT3B);
+MeMegaPiDCMotor motor4(PORT2B);
+
+// Motor speeds
+#define SPEED_FORWARD 50
+#define SPEED_TURN 40
+#define SPEED_SEARCH 30
+#define SPEED_BACKWARD 50
+#define SPEED_TURN_180 60
+
+// Servo settings - manual control
+#define SERVO_PIN A11
+#define SERVO_OPEN 0
+#define SERVO_CLOSED 90
+#define TURN_180_TIME 1200
+
+String inputString = "";
+bool stringComplete = false;
+bool isGrasping = false;
+
+void setup() {
+    Serial.begin(9600);
+    
+    while (!Serial) {
+        delay(10);
+    }
+    
+    // Setup servo pin
+    pinMode(SERVO_PIN, OUTPUT);
+    
+    // Open gripper initially
+    controlServo(SERVO_OPEN);
+    
+    stopMotors();
+    
+    Serial.println("READY");
+}
+
+void loop() {
+    while (Serial.available()) {
+        char inChar = (char)Serial.read();
+        
+        if (inChar == '\n') {
+            stringComplete = true;
+        } else {
+            inputString += inChar;
+        }
+    }
+    
+    if (stringComplete) {
+        inputString.trim();
+        executeCommand(inputString);
+        inputString = "";
+        stringComplete = false;
+    }
+    
+    delay(5);
+}
+
+void executeCommand(String cmd) {
+    if (cmd == "LEFT") {
+        motor1.run(SPEED_TURN);
+        motor2.run(SPEED_TURN);
+        motor3.run(SPEED_TURN);
+        motor4.run(SPEED_TURN);
+        Serial.println("EXEC: LEFT");
+    }
+    else if (cmd == "RIGHT") {
+        motor1.run(-SPEED_TURN);
+        motor2.run(-SPEED_TURN);
+        motor3.run(-SPEED_TURN);
+        motor4.run(-SPEED_TURN);
+        Serial.println("EXEC: RIGHT");
+    }
+    else if (cmd == "FORWARD") {
+        motor1.run(-SPEED_FORWARD);
+        motor2.run(SPEED_FORWARD);
+        motor3.run(-SPEED_FORWARD);
+        motor4.run(SPEED_FORWARD);
+        Serial.println("EXEC: FORWARD");
+    }
+    else if (cmd == "BACKWARD") {
+        motor1.run(SPEED_BACKWARD);
+        motor2.run(-SPEED_BACKWARD);
+        motor3.run(SPEED_BACKWARD);
+        motor4.run(-SPEED_BACKWARD);
+        Serial.println("EXEC: BACKWARD");
+    }
+    else if (cmd == "SEARCH") {
+        motor1.run(-SPEED_SEARCH);
+        motor2.run(-SPEED_SEARCH);
+        motor3.run(-SPEED_SEARCH);
+        motor4.run(-SPEED_SEARCH);
+        Serial.println("EXEC: SEARCH");
+    }
+    else if (cmd == "GRASP") {
+        Serial.println("EXEC: GRASPING");
+        stopMotors();
+        delay(500);
+        controlServo(SERVO_CLOSED);
+        isGrasping = true;
+        delay(1000);
+        Serial.println("EXEC: GRASP_COMPLETE");
+    }
+    else if (cmd == "RELEASE") {
+        Serial.println("EXEC: RELEASING");
+        controlServo(SERVO_OPEN);
+        isGrasping = false;
+        delay(1000);
+        Serial.println("EXEC: RELEASE_COMPLETE");
+    }
+    else if (cmd == "TURN_180") {
+        Serial.println("EXEC: TURN_180");
+        motor1.run(-SPEED_TURN_180);
+        motor2.run(SPEED_TURN_180);
+        motor3.run(-SPEED_TURN_180);
+        motor4.run(SPEED_TURN_180);
+        delay(TURN_180_TIME);
+        stopMotors();
+        Serial.println("EXEC: TURN_180_COMPLETE");
+    }
+    else if (cmd == "STOP") {
+        stopMotors();
+        Serial.println("EXEC: STOP");
+    }
+    else {
+        Serial.print("UNKNOWN: ");
+        Serial.println(cmd);
+    }
+}
+
+void stopMotors() {
+    motor1.stop();
+    motor2.stop();
+    motor3.stop();
+    motor4.stop();
+}
+
+void controlServo(int angle) {
+    // Convert angle (0-90) to microseconds (1000-1900)
+    int pulseWidth = map(angle, 0, 90, 1000, 1900);
+    
+    // Send servo pulse
+    for (int i = 0; i < 10; i++) {
+        digitalWrite(SERVO_PIN, HIGH);
+        delayMicroseconds(pulseWidth);
+        digitalWrite(SERVO_PIN, LOW);
+        delay(20);  // 50Hz
+    }
+}
