@@ -1,55 +1,69 @@
 #include "MeMegaPi.h"
 #include <Adafruit_NeoPixel.h>
+#include "Server.h"
+ 
 
-
-//LIghts
+// Lights Configuration
 #define NUM_LEDS 4
-// Define your two pins
 Adafruit_NeoPixel stripA(NUM_LEDS, A13, NEO_GRB + NEO_KHZ800);
 Adafruit_NeoPixel stripB(NUM_LEDS, A14, NEO_GRB + NEO_KHZ800);
 
-// Motor setup - all 4 motors
-MeMegaPiDCMotor motor1(PORT3A);  // Front left
-MeMegaPiDCMotor motor2(PORT3B);  // Front right  
-MeMegaPiDCMotor motor3(PORT2A);  // Rear eft
-MeMegaPiDCMotor motor4(PORT2B);  // Rear right
+// Motor Mapping
+MeMegaPiDCMotor motor1(PORT3A);
+MeMegaPiDCMotor motor2(PORT2A);
+MeMegaPiDCMotor motor3(PORT3B);
+MeMegaPiDCMotor motor4(PORT2B);
 
-// Motor speeds (adjust these as needed)
-#define SPEED_FORWARD 100    // Normal forward speed
-#define SPEED_TURN 80        // Turning speed
-#define SPEED_SEARCH 60      // Search/slow turn speed
-#define SPEED_BACKWARD 100   // Reverse speed
+// Constants
+#define SPEED_FORWARD 50
+#define SPEED_TURN 40
+#define SPEED_SEARCH 30
+#define SPEED_BACKWARD 50
+#define SPEED_TURN_180 60
+
+
+
+// Servo Settings
+Servo tiltServo;
+Servo clawServo;
+
+#define SERVO_STOP 90      // Neutral (Adjust to 88-92 if it creeps)
+#define SERVO_CW 180       // Close speed
+#define SERVO_CCW 0        // Open speed
+#define ACTION_TIME 200   // Time to spin for full grip/release
+#define TURN_180_TIME 1800
+
+// TRACKING POSITION: Necessary for smooth transitions
+int currentTilt = 135; 
+int currentClaw = 170;
 
 String inputString = "";
 bool stringComplete = false;
+bool isGrasping = false;
 
 void setup() {
     Serial.begin(9600);
     
-    // Wait for serial connection
-    while (!Serial) {
-        delay(10);
-    }
+    stripA.begin();
+    stripB.begin();
+    setStripColor(stripA.Color(0, 0, 0));
     
-    // Initialize all motors to stopped
-    stop_moving();
-    
-    Serial.println("READY");  // Signal to Raspberry Pi
+    // IMPORTANT: Attach the servo pin here
+        // Attach servos to pins A14 and A15
+    tiltServo.attach(A11);
+    clawServo.attach(A15);
 
-  stripA.begin();
-  stripB.begin();
-  stripA.show(); // Initialize all pixels to 'off'
-  stripB.show();
+    // Initial neutral positions
+    tiltServo.write(currentTilt);
+    clawServo.write(currentClaw);
+
+    stopMotors();
+    Serial.println("READY");
 }
 
 void loop() {
-
-    //color_loop();
-
-    // Read serial commands from Raspberry Pi
     while (Serial.available()) {
         char inChar = (char)Serial.read();
-        
         if (inChar == '\n') {
             stringComplete = true;
         } else {
@@ -57,150 +71,134 @@ void loop() {
         }
     }
     
-    // Execute command when complete
     if (stringComplete) {
         inputString.trim();
         executeCommand(inputString);
         inputString = "";
         stringComplete = false;
     }
-    
-    delay(5);  // Small delay
+    delay(5);
+}
+
+void smoothMove(Servo &s, int target, int &current, int speed) {
+    target = constrain(target, 0, 180);
+    while (current != target) {
+        if (current < target) current++;
+        else current--;
+        s.write(current);
+        delay(speed); 
+    }
+}
+// helper function for led control
+void setStripColor(uint32_t color) {
+    for(int i = 0; i < NUM_LEDS; i++) {
+        stripA.setPixelColor(i, color);
+        stripB.setPixelColor(i, color);
+    }
+    stripA.show();
+    stripB.show();
 }
 
 void executeCommand(String cmd) {
-    // Execute command from Raspberry Pi
-    
     if (cmd == "LEFT") {
-        // Rotate left (all motors rotate same direction for spot turn)
+        setStripColor(stripA.Color(0, 0, 255)); // Blue for turning
         motor1.run(SPEED_TURN);
         motor2.run(SPEED_TURN);
         motor3.run(SPEED_TURN);
         motor4.run(SPEED_TURN);
+        Serial.println("EXEC: LEFT");
     }
     else if (cmd == "RIGHT") {
-        // Rotate right (spot turn)
+        setStripColor(stripA.Color(0, 0, 255)); // Blue for turning
         motor1.run(-SPEED_TURN);
         motor2.run(-SPEED_TURN);
         motor3.run(-SPEED_TURN);
         motor4.run(-SPEED_TURN);
+        Serial.println("EXEC: RIGHT");
     }
     else if (cmd == "FORWARD") {
-        // Move forward 
-        motor1.run(SPEED_FORWARD);
+        setStripColor(stripA.Color(0, 255, 0)); // Green for forward
+        motor1.run(-SPEED_FORWARD);
         motor2.run(SPEED_FORWARD);
         motor3.run(-SPEED_FORWARD);
-        motor4.run(-SPEED_FORWARD);
+        motor4.run(SPEED_FORWARD);
+        Serial.println("EXEC: FORWARD");
     }
     else if (cmd == "BACKWARD") {
-        // Move backward
-        motor1.run(-SPEED_BACKWARD);
+        setStripColor(stripA.Color(255, 0, 0)); // Red for reverse
+        motor1.run(SPEED_BACKWARD);
         motor2.run(-SPEED_BACKWARD);
         motor3.run(SPEED_BACKWARD);
-        motor4.run(SPEED_BACKWARD);
-    }
-    else if (cmd == "STRAFE_LEFT") {
-        // Strafe left (if mecanum wheels)
-        motor1.run(-SPEED_TURN);
-        motor2.run(SPEED_TURN);
-        motor3.run(SPEED_TURN);
-        motor4.run(-SPEED_TURN);
-    }
-    else if (cmd == "STRAFE_RIGHT") {
-        // Strafe right (if mecanum wheels)
-        motor1.run(SPEED_TURN);
-        motor2.run(-SPEED_TURN);
-        motor3.run(-SPEED_TURN);
-        motor4.run(SPEED_TURN);
+        motor4.run(-SPEED_BACKWARD);
+        Serial.println("EXEC: BACKWARD");
     }
     else if (cmd == "SEARCH") {
-        // Search for object (slow rotation)
-        motor1.run(SPEED_SEARCH);
-        motor2.run(SPEED_SEARCH);
+        setStripColor(stripA.Color(255, 255, 0)); // Yellow for searching
+        motor1.run(-SPEED_SEARCH);
+        motor2.run(-SPEED_SEARCH);
         motor3.run(-SPEED_SEARCH);
         motor4.run(-SPEED_SEARCH);
-    }
-    else if (cmd == "SEARCH_LEFT") {
-        // Search left (slower rotation)
-        motor1.run(60);
-        motor2.run(60);
-        motor3.run(60);
-        motor4.run(-0);
-    }
-    else if (cmd == "SEARCH_RIGHT") {
-        // Search right (slower rotation)
-        motor1.run(-60);
-        motor2.run(-60);
-        motor3.run(-60);
-        motor4.run(-60);
+        Serial.println("EXEC: SEARCH");
     }
     else if (cmd == "GRASP") {
-        // Stop and grasp
-        stop_moving();
-        delay(1000);  // Simulate grasping time
+        Serial.println("EXEC: GRASPING");
+        stopMotors();
+        
+        
+        // 3. Close claw
+        smoothMove(clawServo, 55, currentClaw, 10);
+        delay(1000);
+
+        // 4. Tilt up
+        smoothMove(tiltServo, 110, currentTilt, 10);
+        delay(2000);
+
+        isGrasping = true;
+        Serial.println("EXEC: GRASP_COMPLETE");
+    }
+    else if (cmd == "RELEASE") {
+        Serial.println("EXEC: RELEASING");
+        
+        // 1. Tilt down
+        smoothMove(tiltServo, 140, currentTilt, 10);
+        delay(500);
+
+        // 2. Open claw
+        smoothMove(clawServo, 170, currentClaw, 15);
+        delay(500);
+                
+        isGrasping = false;
+        Serial.println("EXEC: RELEASE_COMPLETE");
+    }
+
+
+    else if (cmd == "TURN_180") {
+        Serial.println("EXEC: TURN_180");
+        motor1.run(-SPEED_TURN_180);
+        motor2.run(-SPEED_TURN_180);
+        motor3.run(-SPEED_TURN_180);
+        motor4.run(-SPEED_TURN_180);
+        delay(TURN_180_TIME);
+        stopMotors();
+        Serial.println("EXEC: TURN_180_COMPLETE");
     }
     else if (cmd == "STOP") {
-        stop_moving();
+        setStripColor(stripA.Color(0, 0, 0)); // Off when stopped
+        stopMotors();
+        Serial.println("EXEC: STOP");
     }
-    // Ignore unknown commands
+
+    else {
+        Serial.print("UNKNOWN: ");
+        Serial.println(cmd);
+    }
 }
 
-// Movement functions 
-void forward() {
-    motor1.run(SPEED_FORWARD);
-    motor2.run(SPEED_FORWARD);
-    motor3.run(-SPEED_FORWARD);
-    motor4.run(-SPEED_FORWARD);
-}
-
-void reverse() {
-    motor1.run(-SPEED_BACKWARD);
-    motor2.run(-SPEED_BACKWARD);
-    motor3.run(SPEED_BACKWARD);
-    motor4.run(SPEED_BACKWARD);
-}
-
-void rotate_left() {
-    motor1.run(SPEED_TURN);
-    motor2.run(SPEED_TURN);
-    motor3.run(SPEED_TURN);
-    motor4.run(SPEED_TURN);
-}
-
-void rotate_right() {
-    motor1.run(-SPEED_TURN);
-    motor2.run(-SPEED_TURN);
-    motor3.run(-SPEED_TURN);
-    motor4.run(-SPEED_TURN);
-}
-
-void stop_moving() {
+void stopMotors() {
     motor1.stop();
     motor2.stop();
     motor3.stop();
     motor4.stop();
 }
 
-void color_loop()
-{
-  // Turn Pin A13 LEDs Red
-  for(int i=0; i<NUM_LEDS; i++) {
-    stripA.setPixelColor(i, stripA.Color(255, 0, 0));
-  }
-  stripA.show();
 
-  // Turn Pin A14 LEDs Blue
-  for(int i=0; i<NUM_LEDS; i++) {
-    stripB.setPixelColor(i, stripB.Color(0, 0, 255));
-  }
-  stripB.show();
-
-  delay(1000);
-  
-  // Clear all
-  stripA.clear();
-  stripB.clear();
-  stripA.show();
-  stripB.show();
-  delay(1000);
-}
